@@ -2,6 +2,7 @@ import os
 import asyncio
 import csv
 import json
+import gzip
 import time
 from pathlib import Path
 import re
@@ -69,6 +70,13 @@ class NCBI(base.BaseETL):
             "virus_sequence_hmmsearch": [],
         }
 
+        self.submitting_data["core_metadata_collection"].append(
+            {
+                "submitter_id": format_submitter_id("cmc_ncbi_covid19", {}),
+                "projects": [{"code": self.project_code}],
+            }
+        )
+
     def submit_metadata(self):
 
         start = time.strftime("%X")
@@ -92,36 +100,16 @@ class NCBI(base.BaseETL):
         finally:
             loop.close()
         end = time.strftime("%X")
+
+        for k, v in self.submitting_data.items():
+            print(f"Submitting {k} data...")
+            for node in v:
+                node_record = {"type": k}
+                node_record.update(node)
+                self.metadata_helper.add_record_to_submit(node_record)
+            self.metadata_helper.batch_submit_records()
+
         print(f"Running time: From {start} to {end}")
-        import pdb
-
-        pdb.set_trace()
-
-        # for node_name, value in self.nodes.items():
-        #     key = value[0]
-        #     headers = value[1] if len(value) > 1 else None
-
-        #     lists = []
-        #     ext = re.search("\.(.*)$", key).group(1)
-        #     tasks.append(
-        #         asyncio.ensure_future(
-        #             self.index_ncbi_data_file(node_name, ext, key, set(lists), headers)
-        #         )
-        #     )
-
-        # print("Submitting data...")
-
-        # for k, v in self.nodes.items():
-        #     submitter_id_exist = []
-        #     print(f"Submitting {k} data...")
-        #     for node in v:
-        #         node_record = {"type": k}
-        #         node_record.update(node)
-        #         submitter_id = node_record["submitter_id"]
-        #         if submitter_id not in submitter_id_exist:
-        #             submitter_id_exist.append(submitter_id)
-        #             self.metadata_helper.add_record_to_submit(node_record)
-        #     self.metadata_helper.batch_submit_records()
 
     async def get_existed_accession_numbers(self, node_name):
         """
@@ -146,16 +134,20 @@ class NCBI(base.BaseETL):
         existed_accession_numbers = await self.get_existed_accession_numbers(node_name)
 
         s3 = boto3.resource("s3", config=Config(signature_version=UNSIGNED))
-        s3_object = s3.Object(
-            self.bucket, self.data_file.nodes["virus_sequence_run_taxonomy"][0]
-        )
+        s3_object = s3.Object(self.data_file.bucket, self.data_file.nodes[node_name][0])
         file_path = f"{DATA_PATH}/virus_sequence_run_taxonomy.gz"
         s3_object.download_file(file_path)
 
         results = {}
+        n_lines = 0
         with gzip.open(file_path, "rb") as f:
-            bline = f.readline()
-            while bline:
+            while True:
+                bline = f.readline()
+                if not bline:
+                    break
+                n_lines += 1
+                if n_lines % 10000 == 0:
+                    print(f"Finish process {n_lines} of file {node_name}")
                 line = bline.decode("UTF-8")
                 r1 = re.findall("[SDE]RR\d+", line)
                 if len(r1) == 0:
@@ -180,7 +172,7 @@ class NCBI(base.BaseETL):
         for line in line_stream(s3_object.get()["Body"]):
             r1 = re.findall("[SDE]RR\d+", line)
             n_lines += 1
-            if n_lines % 1000 == 0:
+            if n_lines % 10000 == 0:
                 print(f"Finish process {n_lines} of file {node_name}")
             if len(r1) == 0:
                 continue
@@ -197,12 +189,11 @@ class NCBI(base.BaseETL):
             await self.get_submitting_accession_number_list_for_run_taxonomy()
         )
 
-        cmc_submitter_id = format_submitter_id("cmc_ncbi", {})
-        contig_submitter_id = format_submitter_id(
-            "virus_sequence_contig", {"accession_number": accession_number}
-        )
-
+        cmc_submitter_id = format_submitter_id("cmc_ncbi_covid19", {})
         for accession_number in submitting_accession_numbers:
+            contig_submitter_id = format_submitter_id(
+                "virus_sequence_contig", {"accession_number": accession_number}
+            )
             virus_sequence_run_taxonomy_submitter_id = format_submitter_id(
                 "virus_sequences_run_taxonomy_submitter_id", {}
             )
@@ -229,7 +220,7 @@ class NCBI(base.BaseETL):
                 node_name, {"accession_number": accession_number}
             )
 
-            cmc_submitter_id = format_submitter_id("cmc_ncbi", {})
+            cmc_submitter_id = format_submitter_id("cmc_ncbi_covid19", {})
 
             contig_submitter_id = format_submitter_id(
                 "virus_sequence_contig", {"accession_number": accession_number}
@@ -292,22 +283,22 @@ class NCBI(base.BaseETL):
             else:
                 raise Exception(f"ERROR: {node_name} does not exist")
 
-            (
-                did,
-                rev,
-                md5sum,
-                filesize,
-            ) = await self.file_helper.async_find_by_name(filename=filename)
-            did, rev, md5sum, filesize = did, rev, md5sum, filesize
+            # (
+            #     did,
+            #     rev,
+            #     md5sum,
+            #     filesize,
+            # ) = await self.file_helper.async_find_by_name(filename=filename)
+            # did, rev, md5sum, filesize = did, rev, md5sum, filesize
 
-            assert (
-                did
-            ), f"file {node_name} does not exist in the index, rerun NCBI_FILE ETL"
-            self.file_helper.async_update_authz(did=did, rev=rev)
+            # assert (
+            #     did
+            # ), f"file {node_name} does not exist in the index, rerun NCBI_FILE ETL"
+            # self.file_helper.async_update_authz(did=did, rev=rev)
 
-            submitted_json["file_size"] = filesize
-            submitted_json["md5sum"] = md5sum
-            submitted_json["object_id"] = did
+            # submitted_json["file_size"] = filesize
+            # submitted_json["md5sum"] = md5sum
+            # submitted_json["object_id"] = did
 
             self.submitting_data[node_name].append(submitted_json)
 
