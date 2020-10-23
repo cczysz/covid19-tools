@@ -111,77 +111,6 @@ class NCBI(base.BaseETL):
 
         print(f"Running time: From {start} to {end}")
 
-    async def get_existed_accession_numbers(self, node_name):
-        """
-        Get a list of existed accession numbers from the graph
-
-        Args:
-            node_name(str): node name
-        Returns:
-            list(str): list of accession numbers
-        """
-
-        query_string = "{ " + node_name + " (first:0) { submitter_id } }"
-        response = await self.metadata_helper.query_node_data(query_string)
-        records = response["data"][node_name]
-        return set([record["submitter_id"] for record in records])
-
-    async def get_submitting_accession_number_list_for_run_taxonomy(self):
-        """get submitting number list for run_taxonomy file"""
-
-        node_name = "virus_sequence_run_taxonomy"
-        submitting_accession_numbers = set()
-        existed_accession_numbers = await self.get_existed_accession_numbers(node_name)
-
-        s3 = boto3.resource("s3", config=Config(signature_version=UNSIGNED))
-        s3_object = s3.Object(self.data_file.bucket, self.data_file.nodes[node_name][0])
-        file_path = f"{DATA_PATH}/virus_sequence_run_taxonomy.gz"
-        s3_object.download_file(file_path)
-
-        results = {}
-        n_lines = 0
-        with gzip.open(file_path, "rb") as f:
-            while True:
-                bline = f.readline()
-                if not bline:
-                    break
-                n_lines += 1
-                if n_lines % 10000 == 0:
-                    print(f"Finish process {n_lines} of file {node_name}")
-                line = bline.decode("UTF-8")
-                r1 = re.findall("[SDE]RR\d+", line)
-                if len(r1) == 0:
-                    continue
-                read_accession_number = r1[0]
-                if (
-                    f"{node_name}_{read_accession_number}"
-                    not in existed_accession_numbers
-                ):
-                    submitting_accession_numbers.add(read_accession_number)
-        return list(submitting_accession_numbers)
-
-    async def get_submitting_accession_number_list(self, node_name):
-        """get submitting acession number list"""
-
-        submitting_accession_numbers = set()
-        existed_accession_numbers = await self.get_existed_accession_numbers(node_name)
-        s3 = boto3.resource("s3", config=Config(signature_version=UNSIGNED))
-        s3_object = s3.Object(self.data_file.bucket, self.data_file.nodes[node_name][0])
-        line_stream = codecs.getreader("utf-8")
-        n_lines = 0
-        for line in line_stream(s3_object.get()["Body"]):
-            r1 = re.findall("[SDE]RR\d+", line)
-            n_lines += 1
-            if n_lines % 10000 == 0:
-                print(f"Finish process {n_lines} of file {node_name}")
-            if len(r1) == 0:
-                continue
-            read_accession_number = r1[0]
-            if f"{node_name}_{read_accession_number}" not in existed_accession_numbers:
-                submitting_accession_numbers.add(read_accession_number)
-
-        return list(submitting_accession_numbers)
-
     async def files_to_virus_sequence_run_taxonomy_submission(self):
         """get submitting data for virus_sequence_run_taxonomy node"""
 
@@ -206,6 +135,24 @@ class NCBI(base.BaseETL):
                 "data_format": "json",
                 "data_category": "Kmer-based Taxonomy Analysis of Contigs",
             }
+
+            (
+                did,
+                rev,
+                md5sum,
+                filesize,
+            ) = await self.file_helper.async_find_by_name(filename=filename)
+            did, rev, md5sum, filesize = did, rev, md5sum, filesize
+
+            assert (
+                did
+            ), f"file {node_name} does not exist in the index, rerun NCBI_FILE ETL"
+            self.file_helper.async_update_authz(did=did, rev=rev)
+
+            submitted_json["file_size"] = filesize
+            submitted_json["md5sum"] = md5sum
+            submitted_json["object_id"] = did
+
             self.submitting_data["virus_sequence_run_taxonomy"].append(submitted_json)
 
     async def files_to_node_submissions(self, node_name):
@@ -283,24 +230,95 @@ class NCBI(base.BaseETL):
             else:
                 raise Exception(f"ERROR: {node_name} does not exist")
 
-            # (
-            #     did,
-            #     rev,
-            #     md5sum,
-            #     filesize,
-            # ) = await self.file_helper.async_find_by_name(filename=filename)
-            # did, rev, md5sum, filesize = did, rev, md5sum, filesize
+            (
+                did,
+                rev,
+                md5sum,
+                filesize,
+            ) = await self.file_helper.async_find_by_name(filename=filename)
+            did, rev, md5sum, filesize = did, rev, md5sum, filesize
 
-            # assert (
-            #     did
-            # ), f"file {node_name} does not exist in the index, rerun NCBI_FILE ETL"
-            # self.file_helper.async_update_authz(did=did, rev=rev)
+            assert (
+                did
+            ), f"file {node_name} does not exist in the index, rerun NCBI_FILE ETL"
+            self.file_helper.async_update_authz(did=did, rev=rev)
 
-            # submitted_json["file_size"] = filesize
-            # submitted_json["md5sum"] = md5sum
-            # submitted_json["object_id"] = did
+            submitted_json["file_size"] = filesize
+            submitted_json["md5sum"] = md5sum
+            submitted_json["object_id"] = did
 
             self.submitting_data[node_name].append(submitted_json)
+
+    async def get_submitting_accession_number_list_for_run_taxonomy(self):
+        """get submitting number list for run_taxonomy file"""
+
+        node_name = "virus_sequence_run_taxonomy"
+        submitting_accession_numbers = set()
+        existed_accession_numbers = await self.get_existed_accession_numbers(node_name)
+
+        s3 = boto3.resource("s3", config=Config(signature_version=UNSIGNED))
+        s3_object = s3.Object(self.data_file.bucket, self.data_file.nodes[node_name][0])
+        file_path = f"{DATA_PATH}/virus_sequence_run_taxonomy.gz"
+        s3_object.download_file(file_path)
+
+        results = {}
+        n_lines = 0
+        with gzip.open(file_path, "rb") as f:
+            while True:
+                bline = f.readline()
+                if not bline:
+                    break
+                n_lines += 1
+                if n_lines % 10000 == 0:
+                    print(f"Finish process {n_lines} of file {node_name}")
+                line = bline.decode("UTF-8")
+                r1 = re.findall("[SDE]RR\d+", line)
+                if len(r1) == 0:
+                    continue
+                read_accession_number = r1[0]
+                if (
+                    f"{node_name}_{read_accession_number}"
+                    not in existed_accession_numbers
+                ):
+                    submitting_accession_numbers.add(read_accession_number)
+        return list(submitting_accession_numbers)
+
+    async def get_submitting_accession_number_list(self, node_name):
+        """get submitting acession number list"""
+
+        submitting_accession_numbers = set()
+        existed_accession_numbers = await self.get_existed_accession_numbers(node_name)
+        s3 = boto3.resource("s3", config=Config(signature_version=UNSIGNED))
+        s3_object = s3.Object(self.data_file.bucket, self.data_file.nodes[node_name][0])
+        line_stream = codecs.getreader("utf-8")
+        n_lines = 0
+        for line in line_stream(s3_object.get()["Body"]):
+            r1 = re.findall("[SDE]RR\d+", line)
+            n_lines += 1
+            if n_lines % 10000 == 0:
+                print(f"Finish process {n_lines} of file {node_name}")
+            if len(r1) == 0:
+                continue
+            read_accession_number = r1[0]
+            if f"{node_name}_{read_accession_number}" not in existed_accession_numbers:
+                submitting_accession_numbers.add(read_accession_number)
+
+        return list(submitting_accession_numbers)
+
+    async def get_existed_accession_numbers(self, node_name):
+        """
+        Get a list of existed accession numbers from the graph
+
+        Args:
+            node_name(str): node name
+        Returns:
+            list(str): list of accession numbers
+        """
+
+        query_string = "{ " + node_name + " (first:0) { submitter_id } }"
+        response = await self.metadata_helper.query_node_data(query_string)
+        records = response["data"][node_name]
+        return set([record["submitter_id"] for record in records])
 
     def _get_response_from_big_query(self, accession_numbers):
         """Get data from big query"""
