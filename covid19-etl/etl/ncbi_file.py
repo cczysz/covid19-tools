@@ -73,11 +73,10 @@ class NCBI_FILE(base.BaseETL):
             key = value[0]
             headers = value[1] if len(value) > 1 else None
 
-            lists = []
             ext = re.search("\.(.*)$", key).group(1)
             tasks.append(
                 asyncio.ensure_future(
-                    self.index_ncbi_data_file(node_name, ext, key, set(lists), headers)
+                    self.index_ncbi_data_file(node_name, ext, key, headers)
                 )
             )
 
@@ -140,9 +139,7 @@ class NCBI_FILE(base.BaseETL):
                     await out.flush()
             await self.file_to_indexd(file_path)
 
-    async def index_ncbi_data_file(
-        self, node_name, ext, key, excluded_set, headers=None
-    ):
+    async def index_ncbi_data_file(self, node_name, ext, key, headers=None):
         """
         Asynchornous function to index NCBI data file into multiple smaller files
         by accession number and index them to indexd
@@ -151,9 +148,9 @@ class NCBI_FILE(base.BaseETL):
             node_name(str): node name
             ext(str): the file extension (json|tsv|csv)
             key(str): the s3 object key where the file lives
-            excluded_set(set): a set of accession number need to be ignored
             headers(str): headers of the input file
         """
+        excluded_set = self.get_existed_accession_numbers(node_name)
 
         s3 = boto3.resource("s3", config=Config(signature_version=UNSIGNED))
         s3_object = s3.Object(self.bucket, key)
@@ -190,6 +187,21 @@ class NCBI_FILE(base.BaseETL):
         )
 
         return accession_numbers
+
+    async def get_existed_accession_numbers(self, node_name):
+        """
+        Get a list of existed accession numbers from the graph
+
+        Args:
+            node_name(str): node name
+        Returns:
+            list(str): list of accession numbers
+        """
+
+        query_string = "{ " + node_name + " (first:0) { submitter_id } }"
+        response = await self.metadata_helper.query_node_data(query_string)
+        records = response["data"][node_name]
+        return set([record["submitter_id"] for record in records])
 
     async def parse_row(
         self, line, node_name, ext, headers, accession_number, n_rows, f, excluded_set

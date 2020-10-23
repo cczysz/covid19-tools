@@ -254,7 +254,9 @@ class NCBI(base.BaseETL):
 
         node_name = "virus_sequence_run_taxonomy"
         submitting_accession_numbers = set()
-        existed_accession_numbers = await self.get_existed_accession_numbers(node_name)
+        existed_accession_numbers = await self.data_file.get_existed_accession_numbers(
+            node_name
+        )
 
         s3 = boto3.resource("s3", config=Config(signature_version=UNSIGNED))
         s3_object = s3.Object(self.data_file.bucket, self.data_file.nodes[node_name][0])
@@ -287,7 +289,10 @@ class NCBI(base.BaseETL):
         """get submitting acession number list"""
 
         submitting_accession_numbers = set()
-        existed_accession_numbers = await self.get_existed_accession_numbers(node_name)
+        existed_accession_numbers = await self.data_file.get_existed_accession_numbers(
+            node_name
+        )
+
         s3 = boto3.resource("s3", config=Config(signature_version=UNSIGNED))
         s3_object = s3.Object(self.data_file.bucket, self.data_file.nodes[node_name][0])
         line_stream = codecs.getreader("utf-8")
@@ -304,21 +309,6 @@ class NCBI(base.BaseETL):
                 submitting_accession_numbers.add(read_accession_number)
 
         return list(submitting_accession_numbers)
-
-    async def get_existed_accession_numbers(self, node_name):
-        """
-        Get a list of existed accession numbers from the graph
-
-        Args:
-            node_name(str): node name
-        Returns:
-            list(str): list of accession numbers
-        """
-
-        query_string = "{ " + node_name + " (first:0) { submitter_id } }"
-        response = await self.metadata_helper.query_node_data(query_string)
-        records = response["data"][node_name]
-        return set([record["submitter_id"] for record in records])
 
     def _get_response_from_big_query(self, accession_numbers):
         """Get data from big query"""
