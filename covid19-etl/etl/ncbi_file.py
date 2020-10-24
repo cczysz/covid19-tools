@@ -30,7 +30,7 @@ class NCBI_FILE(base.BaseETL):
         super().__init__(base_url, access_token, s3_bucket)
 
         self.program_name = "open"
-        self.project_code = "NCBI_COVID-19"
+        self.project_code = "ncbi-covid-19"
         self.access_number_set = set()
 
         self.file_helper = AsyncFileHelper(
@@ -67,25 +67,27 @@ class NCBI_FILE(base.BaseETL):
         start = time.strftime("%X")
         loop = asyncio.get_event_loop()
         tasks = []
-        for node_name, value in self.nodes.items():
-            if node_name == "virus_sequence_run_taxonomy":
-                continue
-            key = value[0]
-            headers = value[1] if len(value) > 1 else None
+        # for node_name, value in self.nodes.items():
+        #     if node_name == "virus_sequence_run_taxonomy":
+        #         continue
+        #     key = value[0]
+        #     headers = value[1] if len(value) > 1 else None
 
-            ext = re.search("\.(.*)$", key).group(1)
-            tasks.append(
-                asyncio.ensure_future(
-                    self.index_ncbi_data_file(node_name, ext, key, headers)
-                )
-            )
+        #     ext = re.search("\.(.*)$", key).group(1)
+        #     tasks.append(
+        #         asyncio.ensure_future(
+        #             self.index_ncbi_data_file(node_name, ext, key, headers)
+        #         )
+        #     )
 
         try:
             results = loop.run_until_complete(asyncio.gather(*tasks))
 
             loop.run_until_complete(
                 asyncio.gather(
-                    self.index_virus_sequence_run_taxonomy_file(set(results[0]))
+                    self.index_virus_sequence_run_taxonomy_file(
+                        set(["ERR4297043", "ERR4297044"])
+                    )
                 )
             )
 
@@ -116,6 +118,9 @@ class NCBI_FILE(base.BaseETL):
             while line:
                 row = line.decode("UTF-8")
                 words = row.split(",")
+                if words and words[0] not in ["ERR4297043", "ERR4297044"]:
+                    line = f.readline()
+                    continue
                 if (
                     words
                     and words[0] in accession_numbers
@@ -137,6 +142,9 @@ class NCBI_FILE(base.BaseETL):
                 for row in rows:
                     await out.write(row)
                     await out.flush()
+            import pdb
+
+            pdb.set_trace()
             await self.file_to_indexd(Path(file_path))
 
     async def index_ncbi_data_file(self, node_name, ext, key, headers=None):
@@ -151,7 +159,6 @@ class NCBI_FILE(base.BaseETL):
             headers(str): headers of the input file
         """
         excluded_set = await self.get_existed_accession_numbers(node_name)
-
         s3 = boto3.resource("s3", config=Config(signature_version=UNSIGNED))
         s3_object = s3.Object(self.bucket, key)
         line_stream = codecs.getreader("utf-8")
@@ -173,6 +180,8 @@ class NCBI_FILE(base.BaseETL):
                 )
                 accession_numbers.append(accession_number)
                 n_rows += 1
+                if n_rows == 5000000:
+                    break
                 if n_rows % 10000 == 0:
                     print(f"Finish process {n_rows} of file {node_name}")
             except Exception as e:
@@ -234,6 +243,9 @@ class NCBI_FILE(base.BaseETL):
         )
         read_accession_number = r1[0]
 
+        if read_accession_number not in ["ERR4297043", "ERR4297044"]:
+            return f, accession_number
+
         if read_accession_number in excluded_set:
             return f, accession_number
         self.access_number_set.add(f"{node_name}_{read_accession_number}")
@@ -255,7 +267,7 @@ class NCBI_FILE(base.BaseETL):
     async def file_to_indexd(self, filepath):
         """Asynchornous call to index the data file"""
         filename = os.path.basename(filepath)
-        did, rev, md5, size, authz = await self.file_helper.async_find_by_name(filename)
+        did, _, _, _, _, _ = await self.file_helper.async_find_by_name(filename)
         if not did:
             try:
                 guid = await self.file_helper.async_upload_file(filepath)
@@ -264,4 +276,4 @@ class NCBI_FILE(base.BaseETL):
                 print(f"ERROR: Fail to upload file {filepath}. Detail {e}")
         else:
             print(f"file {filepath.name} exists in indexd... skipping...")
-        os.remove(filepath)
+        # os.remove(filepath)

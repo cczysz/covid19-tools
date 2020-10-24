@@ -24,13 +24,20 @@ class AsyncFileHelper:
                     assert (
                         len(data["records"]) == 1
                     ), f"multiple records for filename, something wrong: {filename}"
-                    did = data["records"][0]["did"]
-                    rev = data["records"][0]["rev"]
-                    md5sum = data["records"][0]["hashes"]["md5"]
-                    size = data["records"][0]["size"]
-                    authz = data["records"][0]["authz"]
-                    return did, rev, md5sum, size, authz
-                return None, None, None, None, None
+                    try:
+                        did = data["records"][0]["did"]
+                        rev = data["records"][0]["rev"]
+                        md5sum = data["records"][0]["hashes"]["md5"]
+                        size = data["records"][0]["size"]
+                        authz = data["records"][0]["authz"]
+                        filename = data["records"][0]["file_name"]
+                    except Exception as e:
+                        import pdb
+
+                        pdb.set_trace()
+                        print(e)
+                    return did, rev, md5sum, size, filename, authz
+                return None, None, None, None, "", None
 
     async def async_update_authz(self, did, rev):
         """Asynchronous update authz field for did"""

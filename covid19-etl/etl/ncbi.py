@@ -36,7 +36,7 @@ class NCBI(base.BaseETL):
         super().__init__(base_url, access_token, s3_bucket)
 
         self.program_name = "open"
-        self.project_code = "NCBI-COVID-19"
+        self.project_code = "ncbi-covid-19"
         self.metadata_helper = MetadataHelper(
             base_url=self.base_url,
             program_name=self.program_name,
@@ -61,13 +61,13 @@ class NCBI(base.BaseETL):
             "summary_location": [],
             "virus_sequence": [],
             "sample": [],
-            "virus_sequence_run_taxonomy": [],
             "core_metadata_collection": [],
+            "virus_sequence_run_taxonomy": [],
             "virus_sequence_contig": [],
             "virus_sequence_blastn": [],
             "virus_sequence_contig_taxonomy": [],
             "virus_sequence_peptide": [],
-            "virus_sequence_hmmsearch": [],
+            "virus_sequence_hmm_search": [],
         }
 
         self.submitting_data["core_metadata_collection"].append(
@@ -109,59 +109,62 @@ class NCBI(base.BaseETL):
                 self.metadata_helper.add_record_to_submit(node_record)
             self.metadata_helper.batch_submit_records()
 
+        import pdb
+
+        pdb.set_trace()
+
         print(f"Running time: From {start} to {end}")
 
     async def files_to_virus_sequence_run_taxonomy_submission(self):
         """get submitting data for virus_sequence_run_taxonomy node"""
 
-        submitting_accession_numbers = (
-            await self.get_submitting_accession_number_list_for_run_taxonomy()
-        )
+        # submitting_accession_numbers = (
+        #     await self.get_submitting_accession_number_list_for_run_taxonomy()
+        # )
+        submitting_accession_numbers = ["ERR4297043", "ERR4297044"]
 
         cmc_submitter_id = format_submitter_id("cmc_ncbi_covid19", {})
         for accession_number in submitting_accession_numbers:
-            contig_submitter_id = format_submitter_id(
-                "virus_sequence_contig", {"accession_number": accession_number}
-            )
             virus_sequence_run_taxonomy_submitter_id = format_submitter_id(
-                "virus_sequences_run_taxonomy_submitter_id", {}
+                "virus_sequence_run_taxonomy", {"accession_number": accession_number}
             )
             submitted_json = {
                 "submitter_id": virus_sequence_run_taxonomy_submitter_id,
                 "core_metadata_collections": [{"submitter_id": cmc_submitter_id}],
-                "virus_sequence_contigs": [{"submitter_id": contig_submitter_id}],
                 "accession_number": accession_number,
-                "data_type": "Contig Taxonomy",
+                "data_type": "Virus Sequence Run Taxonomy Analysis",
                 "data_format": "json",
-                "data_category": "Kmer-based Taxonomy Analysis of Contigs",
+                "data_category": "Kmer-based Taxonomy Analysis",
             }
 
-            filename = f"virus_sequences_run_taxonomy_{accession_number}.csv"
+            filename = f"virus_sequence_run_taxonomy_{accession_number}.csv"
             (
                 did,
                 rev,
                 md5sum,
                 filesize,
+                file_name,
+                _,
             ) = await self.file_helper.async_find_by_name(filename=filename)
-            did, rev, md5sum, filesize = did, rev, md5sum, filesize
 
-            assert (
-                did
-            ), f"file {node_name} does not exist in the index, rerun NCBI_FILE ETL"
-            self.file_helper.async_update_authz(did=did, rev=rev)
+            assert did, f"file {did} does not exist in the index, rerun NCBI_FILE ETL"
+            # await self.file_helper.async_update_authz(did=did, rev=rev)
 
             submitted_json["file_size"] = filesize
             submitted_json["md5sum"] = md5sum
             submitted_json["object_id"] = did
+            submitted_json["file_name"] = file_name
 
             self.submitting_data["virus_sequence_run_taxonomy"].append(submitted_json)
 
     async def files_to_node_submissions(self, node_name):
         """Get submitting data for the node"""
 
-        submitting_accession_numbers = await self.get_submitting_accession_number_list(
-            node_name
-        )
+        submitting_accession_numbers = ["ERR4297043", "ERR4297044"]
+
+        # submitting_accession_numbers = await self.get_submitting_accession_number_list(
+        #     node_name
+        # )
 
         for accession_number in submitting_accession_numbers:
             submitter_id = format_submitter_id(
@@ -183,7 +186,10 @@ class NCBI(base.BaseETL):
                 "virus_sequence_peptide", {"accession_number": accession_number}
             )
             hmmsearch_submitter_id = format_submitter_id(
-                "virus_sequence_hmmsearch", {"accession_number": accession_number}
+                "virus_sequence_hmm_search", {"accession_number": accession_number}
+            )
+            run_taxonomy_submitter_id = format_submitter_id(
+                "virus_sequence_run_taxonomy", {"accession_number": accession_number}
             )
 
             if node_name == "virus_sequence_contig":
@@ -191,7 +197,7 @@ class NCBI(base.BaseETL):
                     "submitter_id": submitter_id,
                     "core_metadata_collections": [{"submitter_id": cmc_submitter_id}],
                     "virus_sequences_run_taxonomies": [
-                        {"submitter_id": "virus_sequences_run_taxonomy_submitter_id"}
+                        {"submitter_id": run_taxonomy_submitter_id}
                     ],
                     "accession_number": accession_number,
                     "data_type": "Virus Sequence Contig",
@@ -218,7 +224,7 @@ class NCBI(base.BaseETL):
                     "data_format": "json",
                     "data_category": "Peptides Annotation",
                 }
-            elif node_name == "virus_sequence_hmmsearch":
+            elif node_name == "virus_sequence_hmm_search":
                 submitted_json = {
                     "submitter_id": submitter_id,
                     "core_metadata_collections": [{"submitter_id": cmc_submitter_id}],
@@ -231,24 +237,26 @@ class NCBI(base.BaseETL):
             else:
                 raise Exception(f"ERROR: {node_name} does not exist")
 
-            ext = re.search("\.(.*)$", self.data_file.nodes[node][0]).group(1)
+            ext = re.search("\.(.*)$", self.data_file.nodes[node_name][0]).group(1)
             filename = f"{node_name}_{accession_number}.{ext}"
             (
                 did,
                 rev,
                 md5sum,
                 filesize,
+                file_name,
+                _,
             ) = await self.file_helper.async_find_by_name(filename=filename)
-            did, rev, md5sum, filesize = did, rev, md5sum, filesize
 
             assert (
                 did
-            ), f"file {node_name} does not exist in the index, rerun NCBI_FILE ETL"
-            self.file_helper.async_update_authz(did=did, rev=rev)
+            ), f"file {filename} does not exist in the index, rerun NCBI_FILE ETL"
+            # await self.file_helper.async_update_authz(did=did, rev=rev)
 
             submitted_json["file_size"] = filesize
             submitted_json["md5sum"] = md5sum
             submitted_json["object_id"] = did
+            submitted_json["file_name"] = file_name
 
             self.submitting_data[node_name].append(submitted_json)
 
@@ -274,6 +282,8 @@ class NCBI(base.BaseETL):
                 if not bline:
                     break
                 n_lines += 1
+                if n_lines == 10000000:
+                    break
                 if n_lines % 10000 == 0:
                     print(f"Finish process {n_lines} of file {node_name}")
                 line = bline.decode("UTF-8")
