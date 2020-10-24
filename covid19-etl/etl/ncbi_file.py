@@ -55,7 +55,7 @@ class NCBI_FILE(base.BaseETL):
                 "blastn/blastn.tsv",
                 "acc\tqacc\tstaxid\tsacc\tslen\tlength\tbitscore\tscore\tpident\tsskingdom\tevalue\tssciname\n",
             ],
-            "virus_sequence_notc": ["hmmsearch_notc/hmmsearch_notc.json"],
+            "virus_sequence_hmm_search": ["hmmsearch_notc/hmmsearch_notc.json"],
             "virus_sequence_run_taxonomy": [
                 "sra_taxonomy/coronaviridae_07_31_2020_000000000000.gz"
             ],
