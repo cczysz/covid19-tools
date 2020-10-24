@@ -137,7 +137,7 @@ class NCBI_FILE(base.BaseETL):
                 for row in rows:
                     await out.write(row)
                     await out.flush()
-            await self.file_to_indexd(file_path)
+            await self.file_to_indexd(Path(file_path))
 
     async def index_ncbi_data_file(self, node_name, ext, key, headers=None):
         """
@@ -150,7 +150,7 @@ class NCBI_FILE(base.BaseETL):
             key(str): the s3 object key where the file lives
             headers(str): headers of the input file
         """
-        excluded_set = self.get_existed_accession_numbers(node_name)
+        excluded_set = await self.get_existed_accession_numbers(node_name)
 
         s3 = boto3.resource("s3", config=Config(signature_version=UNSIGNED))
         s3_object = s3.Object(self.bucket, key)
