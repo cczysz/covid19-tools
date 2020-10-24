@@ -136,6 +136,7 @@ class NCBI(base.BaseETL):
                 "data_category": "Kmer-based Taxonomy Analysis of Contigs",
             }
 
+            filename = f"virus_sequences_run_taxonomy_{accession_number}.csv"
             (
                 did,
                 rev,
@@ -230,6 +231,8 @@ class NCBI(base.BaseETL):
             else:
                 raise Exception(f"ERROR: {node_name} does not exist")
 
+            ext = re.search("\.(.*)$", self.data_file.nodes[node][0]).group(1)
+            filename = f"{node_name}_{accession_number}.{ext}"
             (
                 did,
                 rev,
