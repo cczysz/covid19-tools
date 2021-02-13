@@ -1,0 +1,6 @@
+awscli==1.18.*
+jupyter==1.0.0
+pandas
+matplotlib
+numpy
+scipy
